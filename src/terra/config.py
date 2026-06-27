@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     ba_jobs_default_size: int = 10
     ba_jobs_fetch_details_limit: int = 5
 
+    # Static Knowledge Base (Integreat CMS pages)
+    static_kb_api_url: str = (
+        "https://cms.integreat-app.de/testumgebung-frag-integreat"
+        "/de/wp-json/extensions/v3/pages/"
+    )
+    static_kb_api_key: str | None = None
+    static_kb_raw_path: str = "data/static_kb/raw/payload.json"
+    static_kb_processed_path: str = "data/static_kb/processed/pages.json"
+    static_kb_fetch_timeout_seconds: float = 60.0
+
 
 @lru_cache
 def get_settings() -> Settings:
