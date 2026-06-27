@@ -1,0 +1,72 @@
+[
+  {
+    "id": "100001",
+    "title": "Gesundheitsversorgung",
+    "path": "/test/de/gesundheit/gesundheitsversorgung/",
+    "category": "gesundheit",
+    "content_text": "In Deutschland gibt es eine Krankenversicherungspflicht. Jede Person muss krankenversichert sein. Sie können zwischen gesetzlicher und privater Krankenversicherung wählen.",
+    "content_html": "<p>In Deutschland gibt es eine Krankenversicherungspflicht.</p>",
+    "excerpt": "",
+    "url": "https://example.com/gesundheit/gesundheitsversorgung/",
+    "modified": "2025-01-10T10:00:00Z",
+    "parent_id": "100000",
+    "languages": ["de", "en", "ar"],
+    "thumbnail": ""
+  },
+  {
+    "id": "100002",
+    "title": "Deutschkurse und Integrationskurse",
+    "path": "/test/de/schule-studium-bildung/deutschkurse/",
+    "category": "schule-studium-bildung",
+    "content_text": "Integrationskurse bestehen aus einem Sprachkurs und einem Orientierungskurs. Der Sprachkurs umfasst 600 Stunden Deutschunterricht bis Niveau B1.",
+    "content_html": "<p>Integrationskurse bestehen aus einem Sprachkurs.</p>",
+    "excerpt": "",
+    "url": "https://example.com/bildung/deutschkurse/",
+    "modified": "2025-02-15T08:30:00Z",
+    "parent_id": "100000",
+    "languages": ["de", "en", "ar", "fr"],
+    "thumbnail": ""
+  },
+  {
+    "id": "100003",
+    "title": "Wohnung finden",
+    "path": "/test/de/alltag/wohnung-finden/",
+    "category": "alltag",
+    "content_text": "Eine Wohnung in Deutschland zu finden kann schwierig sein. Nutzen Sie Portale wie Immobilienscout24 oder WG-Gesucht. Achten Sie auf Kaution und Nebenkosten.",
+    "content_html": "<p>Eine Wohnung in Deutschland zu finden kann schwierig sein.</p>",
+    "excerpt": "",
+    "url": "https://example.com/alltag/wohnung-finden/",
+    "modified": "2025-03-01T14:00:00Z",
+    "parent_id": "100000",
+    "languages": ["de", "en"],
+    "thumbnail": ""
+  },
+  {
+    "id": "100004",
+    "title": "Arbeitserlaubnis",
+    "path": "/test/de/arbeit-ausbildung/arbeitserlaubnis/",
+    "category": "arbeit-ausbildung",
+    "content_text": "Ob Sie in Deutschland arbeiten dürfen, hängt von Ihrem Aufenthaltsstatus ab. EU-Bürger benötigen keine Arbeitserlaubnis. Nicht-EU-Bürger brauchen eine Aufenthaltserlaubnis mit Arbeitserlaubnis.",
+    "content_html": "<p>Ob Sie arbeiten dürfen hängt vom Aufenthaltsstatus ab.</p>",
+    "excerpt": "",
+    "url": "https://example.com/arbeit/arbeitserlaubnis/",
+    "modified": "2025-01-20T09:15:00Z",
+    "parent_id": "100000",
+    "languages": ["de", "en", "ar", "fa"],
+    "thumbnail": ""
+  },
+  {
+    "id": "100005",
+    "title": "Beratungsstellen",
+    "path": "/test/de/beratung-und-hilfe/beratungsstellen/",
+    "category": "beratung-und-hilfe-4",
+    "content_text": "Es gibt viele Beratungsstellen für Migrantinnen und Migranten. Die Migrationsberatung für Erwachsene (MBE) hilft bei Fragen zum Alltag, Arbeit und Behörden.",
+    "content_html": "<p>Es gibt viele Beratungsstellen.</p>",
+    "excerpt": "",
+    "url": "https://example.com/beratung/beratungsstellen/",
+    "modified": "2025-02-28T11:00:00Z",
+    "parent_id": "100000",
+    "languages": ["de", "en", "ar", "tr"],
+    "thumbnail": ""
+  }
+]
