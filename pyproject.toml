@@ -15,6 +15,7 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "litellm>=1.60.0",
     "httpx>=0.28.0",
+    "bcrypt>=4.2.0",
 ]
 
 [project.optional-dependencies]
@@ -57,10 +58,12 @@ ignore = [
     "S101",  # assert used (needed in tests)
     "B008",  # function call in default argument (needed for FastAPI Depends)
     "TC001", # type-checking import (conflicts with Pydantic runtime needs)
+    "TC002", # type-checking import (conflicts with SQLAlchemy/runtime needs)
+    "TC003", # type-checking import (conflicts with SQLAlchemy Mapped types)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "ARG001"]
+"tests/**/*.py" = ["S101", "ARG001", "S106"]
 "src/terra/db/migrations/**/*.py" = ["E501"]
 
 [tool.ruff.lint.isort]
