@@ -1,0 +1,8 @@
+"""API v1 router — register domain routers here."""
+
+from fastapi import APIRouter
+
+from terra.api.v1.endpoints.health import router as health_router
+
+router = APIRouter()
+router.include_router(health_router, tags=["health"])
