@@ -15,7 +15,7 @@ class StubAgent(Agent):
     async def run(
         self,
         input_message: str,
-        context: dict[str, Any] | None = None,  # noqa: ARG002
+        context: dict[str, Any] | None = None,
     ) -> AgentResult:
         return AgentResult(
             success=True,
@@ -23,7 +23,7 @@ class StubAgent(Agent):
             iterations=1,
         )
 
-    async def step(self, messages: list[ChatMessage]) -> ChatMessage:  # noqa: ARG002
+    async def step(self, messages: list[ChatMessage]) -> ChatMessage:
         return ChatMessage(role="assistant", content="stub step")
 
 
