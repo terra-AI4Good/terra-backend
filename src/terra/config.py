@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     search_api_key: str | None = None
     search_api_provider: str = "tavily"
 
+    # BA Jobsuche API
+    ba_jobs_base_url: str = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service"
+    ba_jobs_api_key: str = "jobboerse-jobsuche"
+    ba_jobs_default_radius_km: int = 50
+    ba_jobs_default_size: int = 10
+    ba_jobs_fetch_details_limit: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:
