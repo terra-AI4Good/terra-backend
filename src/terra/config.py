@@ -31,6 +31,22 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"  # noqa: S105
     allowed_origins: list[str] = ["http://localhost:3000"]
 
+    # LLM / LiteLLM
+    llm_default_model: str = "gpt-4o-mini"
+    llm_default_temperature: float = 0.7
+    llm_default_max_tokens: int = 4096
+    llm_default_timeout: float = 60.0
+
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    azure_api_key: str | None = None
+    azure_api_base: str | None = None
+    azure_api_version: str | None = None
+
+    # Tools / External services
+    search_api_key: str | None = None
+    search_api_provider: str = "tavily"
+
 
 @lru_cache
 def get_settings() -> Settings:
