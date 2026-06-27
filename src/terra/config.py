@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     static_kb_processed_path: str = "data/static_kb/processed/pages.json"
     static_kb_fetch_timeout_seconds: float = 60.0
 
+    # Memory
+    memory_provider: str = "database"
+    memory_context_limit: int = 20
+
 
 @lru_cache
 def get_settings() -> Settings:
