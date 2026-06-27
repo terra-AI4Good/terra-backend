@@ -13,6 +13,8 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     "aiosqlite>=0.21.0",
+    "litellm>=1.60.0",
+    "httpx>=0.28.0",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,7 @@ select = [
 ignore = [
     "S101",  # assert used (needed in tests)
     "B008",  # function call in default argument (needed for FastAPI Depends)
+    "TC001", # type-checking import (conflicts with Pydantic runtime needs)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -73,6 +76,10 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "litellm.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
