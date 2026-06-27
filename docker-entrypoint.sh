@@ -21,10 +21,11 @@ asyncio.run(init_db())
 print('Database tables created.')
 "
 
-# Fetch static knowledge base if not already present
+# Fetch static knowledge base in the background (non-blocking)
+# Server starts immediately; KB will be available once fetch completes.
 if [ ! -f "data/static_kb/processed/pages.json" ]; then
-    echo "==> Fetching static knowledge base..."
-    python -m terra.scripts.fetch_static_kb || echo "WARNING: KB fetch failed (non-fatal)"
+    echo "==> Fetching static knowledge base (background)..."
+    python -m terra.scripts.fetch_static_kb &
 else
     echo "==> Static KB already present, skipping fetch."
 fi
