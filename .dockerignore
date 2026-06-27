@@ -1,0 +1,37 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.mypy_cache/
+
+# Environment (secrets)
+.env
+
+# Database (will be created fresh in container)
+*.db
+*.sqlite3
+
+# Large raw data (fetched at runtime)
+data/static_kb/raw/payload.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pre-commit
+.pre-commit-config.yaml
