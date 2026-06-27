@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Tools / External services
     search_api_key: str | None = None
     search_api_provider: str = "tavily"
+    tavily_api_key: str | None = None
+    tavily_search_depth: str = "basic"
+    tavily_default_max_results: int = 5
+    tavily_timeout_seconds: float = 20.0
 
     # BA Jobsuche API
     ba_jobs_base_url: str = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service"

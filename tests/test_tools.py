@@ -2,6 +2,7 @@
 
 import pytest
 
+from terra.services.search.base import SearchProvider, SearchResponse, SearchResult
 from terra.tools.base import ToolDefinition, ToolParameter
 from terra.tools.browser import WebBrowserTool
 from terra.tools.custom_data import CustomDataTool
@@ -11,10 +12,25 @@ from terra.tools.registry import ToolRegistry
 from terra.tools.search import WebSearchTool
 
 
+class _MockProvider(SearchProvider):
+    async def search(self, query: str, **kwargs) -> SearchResponse:
+        return SearchResponse(
+            query=query,
+            results=[
+                SearchResult(
+                    title="Mock",
+                    url="https://mock.test",
+                    snippet="mock result",
+                    domain="mock.test",
+                )
+            ],
+        )
+
+
 class TestToolRegistry:
     def test_register_and_lookup(self):
         registry = ToolRegistry()
-        tool = WebSearchTool()
+        tool = WebSearchTool(provider=_MockProvider())
         registry.register(tool)
 
         assert "web_search" in registry
@@ -23,7 +39,7 @@ class TestToolRegistry:
 
     def test_register_duplicate_raises(self):
         registry = ToolRegistry()
-        tool = WebSearchTool()
+        tool = WebSearchTool(provider=_MockProvider())
         registry.register(tool)
 
         with pytest.raises(ValueError, match="already registered"):
@@ -40,7 +56,7 @@ class TestToolRegistry:
 
     def test_list_names(self):
         registry = ToolRegistry()
-        registry.register(WebSearchTool())
+        registry.register(WebSearchTool(provider=_MockProvider()))
         registry.register(WebBrowserTool())
 
         names = registry.list_names()
@@ -49,7 +65,7 @@ class TestToolRegistry:
 
     def test_get_openai_schemas(self):
         registry = ToolRegistry()
-        registry.register(WebSearchTool())
+        registry.register(WebSearchTool(provider=_MockProvider()))
 
         schemas = registry.get_openai_schemas()
         assert len(schemas) == 1
@@ -58,7 +74,7 @@ class TestToolRegistry:
 
     async def test_execute_tool(self):
         registry = ToolRegistry()
-        registry.register(WebSearchTool())
+        registry.register(WebSearchTool(provider=_MockProvider()))
 
         result = await registry.execute("web_search", query="test")
         assert result.success is True
@@ -75,7 +91,7 @@ class TestToolImplementations:
     """Verify all placeholder tools can be imported and instantiated."""
 
     def test_web_search_tool(self):
-        tool = WebSearchTool()
+        tool = WebSearchTool(provider=_MockProvider())
         assert tool.name == "web_search"
         assert tool.definition.parameters
 
