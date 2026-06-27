@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from terra.api.router import router as api_router
 from terra.config import get_settings
+from terra.setup import register_all
 
 
 def create_app() -> FastAPI:
@@ -24,6 +25,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Register all tools and agents
+    register_all()
 
     app.include_router(api_router)
 

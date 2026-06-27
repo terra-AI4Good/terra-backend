@@ -11,16 +11,27 @@ async def test_agents_health(client: AsyncClient):
     assert data["subsystem"] == "agents"
 
 
-async def test_list_agents_empty(client: AsyncClient):
+async def test_list_agents_returns_registered(client: AsyncClient):
     response = await client.get("/api/v1/agents")
     assert response.status_code == 200
-    assert response.json() == []
+    agents = response.json()
+    assert len(agents) >= 3
+    names = {a["name"] for a in agents}
+    assert "web_search" in names
+    assert "job_listings" in names
+    assert "static_knowledge_base" in names
 
 
-async def test_list_tools_empty(client: AsyncClient):
+async def test_list_tools_returns_registered(client: AsyncClient):
     response = await client.get("/api/v1/tools")
     assert response.status_code == 200
-    assert response.json() == []
+    tools = response.json()
+    assert len(tools) >= 6
+    names = {t["name"] for t in tools}
+    assert "web_search" in names
+    assert "search_ba_jobs" in names
+    assert "search_static_kb" in names
+    assert "get_static_kb_item" in names
 
 
 async def test_run_agent_not_found(client: AsyncClient):

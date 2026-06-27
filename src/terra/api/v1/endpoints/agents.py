@@ -78,7 +78,7 @@ async def list_tools() -> list[ToolInfo]:
 
 @router.post("/agents/run", response_model=AgentRunResponse)
 async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
-    """Execute an agent (placeholder — returns stub response)."""
+    """Execute a registered agent."""
     from terra.agents.registry import agent_registry
 
     if request.agent_name not in agent_registry:
@@ -88,10 +88,16 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             error=f"Agent '{request.agent_name}' not found",
         )
 
-    # Placeholder — actual execution will use AgentRunner
+    agent = agent_registry.create(request.agent_name)
+    result = await agent.run(
+        input_message=request.input_message,
+        context=request.context or None,
+    )
+
     return AgentRunResponse(
-        success=True,
-        output=f"Agent '{request.agent_name}' executed (stub)",
-        tool_calls_made=0,
-        iterations=0,
+        success=result.success,
+        output=result.output,
+        tool_calls_made=result.tool_calls_made,
+        iterations=result.iterations,
+        error=result.error,
     )
