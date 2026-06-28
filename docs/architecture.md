@@ -2,391 +2,338 @@
 
 ## Overview
 
-Terra Backend is a FastAPI application that provides a memory-backed conversational AI assistant with pluggable tools, agents, and MCP (Model Context Protocol) integration. It is designed to help migrants and newcomers to Germany find jobs, understand visa requirements, and navigate integration resources.
+Terra Backend is a FastAPI application providing a memory-backed conversational AI assistant for migrants and newcomers in Germany. It follows a layered architecture: HTTP → Services → Abstractions → External APIs.
 
-## System Architecture
+```
+HTTP (FastAPI)
+    ↓
+Services (ChatbotService, AuthService, DocumentService)
+    ↓
+Abstractions (MemoryStore, LLMService, Tool, Agent)
+    ↓
+Implementations (DatabaseMemoryStore, LiteLLM, ToolRegistry, AgentRunner)
+    ↓
+External (OpenAI, Tavily, BA API, Integreat, MCP servers)
+```
+
+---
+
+## Component Map
 
 ```mermaid
 graph TB
-    subgraph Clients
-        Web[Web Frontend]
-        Mobile[Mobile App]
-        API_Client[API Client]
+    Client[Client]
+
+    subgraph HTTP Layer
+        Router[FastAPI Router]
+        AuthEP[/auth endpoints/]
+        ChatEP[/chat endpoint/]
+        DocEP[/documents endpoints/]
+        AgentEP[/agents + tools endpoints/]
+        MCPEP[/mcp endpoints/]
+        Deps[deps: get_db, get_current_user]
     end
 
-    subgraph "Terra Backend (FastAPI)"
-        subgraph "API Layer"
-            Router[API Router /api/v1]
-            AuthEP[Auth Endpoints]
-            ChatEP[Chat Endpoint]
-            DocsEP[Documents Endpoints]
-            AgentsEP[Agents Endpoints]
-            MCPEP[MCP Endpoints]
-            HealthEP[Health Endpoints]
-        end
-
-        subgraph "Service Layer"
-            AuthSvc[Auth Service]
-            ChatSvc[Chatbot Service]
-            DocSvc[Document Service]
-            SearchSvc[Search Service]
-            StaticKB[Static KB Service]
-            BAClient[BA Jobs Client]
-        end
-
-        subgraph "Core Infrastructure"
-            LLM[LLM Service - LiteLLM]
-            Memory[Memory Store]
-            ToolReg[Tool Registry]
-            AgentReg[Agent Registry]
-            MCPReg[MCP Registry]
-            MCPClient[MCP Client]
-            ORM[SQLAlchemy ORM]
-        end
+    subgraph Services
+        AuthSvc[AuthService]
+        ChatSvc[ChatbotService]
+        DocSvc[DocumentService]
+        BAClient[BAJobsClient]
+        KBSvc[StaticKBService]
+        SearchSvc[SearchProvider / TavilySearchProvider]
     end
 
-    subgraph "External Services"
-        OpenAI[OpenAI API]
-        Anthropic[Anthropic API]
-        Tavily[Tavily Search]
-        BA_API[BA Jobsuche API]
-        Integreat[Integreat CMS API]
-        TerraMig[Terra-MIG MCP Server]
+    subgraph Core Abstractions
+        LLM[LLMService / LiteLLM]
+        Mem[MemoryStore / DatabaseMemoryStore]
+        TR[ToolRegistry]
+        AR[AgentRegistry]
+        Runner[AgentRunner]
+        Hooks[ExecutionHooks]
     end
 
-    subgraph "Storage"
-        SQLite[(SQLite Database)]
-        KBFiles[Static KB JSON Files]
+    subgraph MCP Subsystem
+        MCPReg[MCPRegistry]
+        MCPClient[MCPClient]
+        MCPSvc[MCPService]
+        Adapter[MCPToolAdapter]
     end
 
-    Web --> Router
-    Mobile --> Router
-    API_Client --> Router
+    subgraph Storage
+        DB[(SQLite)]
+        KBFile[pages.json]
+    end
 
-    Router --> AuthEP
-    Router --> ChatEP
-    Router --> DocsEP
-    Router --> AgentsEP
-    Router --> MCPEP
-    Router --> HealthEP
+    subgraph External
+        LLMAPI[OpenAI / Anthropic / Azure]
+        Tavily[Tavily API]
+        BAAPI[BA Jobsuche API]
+        TerraMig[terra-mig MCP Server]
+    end
 
-    AuthEP --> AuthSvc
+    Client --> Router
+    Router --> AuthEP & ChatEP & DocEP & AgentEP & MCPEP
+    AuthEP --> AuthSvc --> DB
     ChatEP --> ChatSvc
-    DocsEP --> DocSvc
-    AgentsEP --> AgentReg
-    MCPEP --> MCPClient
-
-    ChatSvc --> LLM
-    ChatSvc --> Memory
-    ChatSvc --> ToolReg
-    DocSvc --> Memory
-
-    AuthSvc --> ORM
-    Memory --> ORM
-    DocSvc --> ORM
-    ORM --> SQLite
-
-    LLM --> OpenAI
-    LLM --> Anthropic
-    ToolReg --> Tavily
-    ToolReg --> BA_API
-    StaticKB --> KBFiles
-    MCPClient --> TerraMig
-    StaticKB --> Integreat
+    ChatSvc --> Mem --> DB
+    ChatSvc --> LLM --> LLMAPI
+    ChatSvc --> TR
+    DocEP --> DocSvc --> DB
+    DocSvc --> Mem
+    AgentEP --> AR --> Runner --> TR
+    Runner --> Hooks
+    TR --> SearchSvc --> Tavily
+    TR --> BAClient --> BAAPI
+    TR --> KBSvc --> KBFile
+    MCPEP --> MCPSvc --> MCPReg --> MCPClient --> TerraMig
+    MCPSvc --> Adapter --> TR
 ```
 
-## Request Lifecycle
+---
+
+## Startup Sequence
+
+```mermaid
+sequenceDiagram
+    participant UV as uvicorn
+    participant App as create_app()
+    participant Setup as setup.register_all()
+    participant DB as SQLite
+    participant MCP as MCPService
+
+    UV->>App: import terra.main:app
+    App->>Setup: register_all()
+    Setup->>Setup: _register_tools() — 10 tools into tool_registry
+    Setup->>Setup: _register_agents() — 3 agents into agent_registry
+    Setup->>Setup: _register_mcp_servers() — terra-mig into mcp_registry
+    App->>App: add CORS middleware
+    App->>App: attach lifespan handler
+    UV->>App: startup event
+    App->>DB: create_all() — ensure tables exist
+    App->>MCP: discover_mcp_tools() — non-fatal
+    MCP->>MCP: initialize MCP session
+    MCP->>MCP: list_tools() from terra-mig
+    MCP->>MCP: register MCPToolAdapters into tool_registry
+    App-->>UV: ready
+```
+
+---
+
+## Request Lifecycle (Chat)
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant MW as CORS Middleware
-    participant R as Router
-    participant D as Dependencies
-    participant EP as Endpoint
-    participant S as Service
-    participant DB as Database
-
-    C->>MW: HTTP Request
-    MW->>R: Route to handler
-    R->>D: Resolve dependencies (get_db, get_current_user)
-    D->>DB: Validate session token
-    DB-->>D: Session + User
-    D->>EP: Inject dependencies
-    EP->>S: Call service layer
-    S-->>EP: Result
-    EP-->>C: JSON Response
-```
-
-## Chatbot Orchestration Flow
-
-The chatbot service is the core of Terra. It orchestrates memory retrieval, LLM calls, and tool execution in a loop.
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant EP as /api/v1/chat
-    participant CS as ChatbotService
-    participant MS as MemoryStore
-    participant LLM as LLMService
+    participant FastAPI
+    participant Deps as get_current_user
+    participant ChatSvc as ChatbotService
+    participant Mem as MemoryStore
+    participant LLM as LiteLLM
     participant TR as ToolRegistry
-    participant T as Tool
+    participant Tool as (any Tool)
 
-    U->>EP: POST {message}
-    EP->>CS: chat(user_id, message)
+    C->>FastAPI: POST /api/v1/chat\nAuthorization: Bearer <token>
+    FastAPI->>Deps: validate token
+    Deps->>Deps: SELECT session WHERE token=... AND expires > now
+    Deps-->>FastAPI: User object
+    FastAPI->>ChatSvc: chat(user_id=1, message="...")
+    ChatSvc->>Mem: retrieve(user_id=1, limit=20)
+    Mem-->>ChatSvc: [MemoryEntry(role, content, timestamp), ...]
+    ChatSvc->>ChatSvc: build_messages:\n  [system_prompt, ...history, user_message]
+    ChatSvc->>ChatSvc: get_openai_schemas() from tool_registry
 
-    CS->>MS: retrieve(user_id, limit=20)
-    MS-->>CS: memory_entries[]
-
-    Note over CS: Build messages:<br/>system + memory + user
-
-    loop Max 5 rounds
-        CS->>LLM: completion(messages, tool_schemas)
-        LLM-->>CS: response (may include tool_calls)
-
-        alt No tool calls
-            Note over CS: Final response ready
-        else Has tool calls
-            loop For each tool_call
-                CS->>TR: execute(tool_name, kwargs)
-                TR->>T: execute(**kwargs)
-                T-->>TR: ToolResult
-                TR-->>CS: result
-                Note over CS: Append tool result to messages
+    loop up to max_tool_rounds=5
+        ChatSvc->>LLM: acompletion(messages, tools)
+        LLM-->>ChatSvc: LLMResponse
+        alt response has tool_calls
+            loop each tool call
+                ChatSvc->>TR: execute(tool_name, **kwargs)
+                TR->>Tool: execute(**kwargs)
+                Tool-->>TR: ToolResult
+                TR-->>ChatSvc: ToolResult
+                ChatSvc->>ChatSvc: append tool result message
             end
+        else no tool_calls
+            ChatSvc->>ChatSvc: break
         end
     end
 
-    CS->>MS: add(user_id, "user", message)
-    CS->>MS: add(user_id, "assistant", response)
-    CS-->>EP: ChatResponse
-    EP-->>U: JSON {response, used_tools}
+    ChatSvc->>Mem: add(user_id, "user", message)
+    ChatSvc->>Mem: add(user_id, "assistant", response)
+    ChatSvc-->>FastAPI: ChatResponse(response, used_tools)
+    FastAPI-->>C: JSON response
 ```
+
+---
+
+## Tool Registration Flow
+
+Tools are registered once at startup in `setup.py`. The global `tool_registry` singleton is used everywhere.
+
+```mermaid
+flowchart TD
+    setup["setup.register_all()"]
+    setup --> rt["_register_tools()"]
+    setup --> ra["_register_agents()"]
+    setup --> rm["_register_mcp_servers()"]
+
+    rt --> |register| TR[tool_registry]
+
+    rm --> |register config| MR[mcp_registry]
+    MR --> |startup discover| Adapter[MCPToolAdapter per tool]
+    Adapter --> |register| TR
+
+    TR --> |get_openai_schemas()| LLM[Chatbot / AgentRunner]
+    TR --> |execute(name, **kwargs)| Tools
+```
+
+---
 
 ## Memory Flow
 
 ```mermaid
 flowchart LR
-    subgraph "Memory Write"
-        A[User Message] --> B[Store as user entry]
-        C[Assistant Response] --> D[Store as assistant entry]
-        E[Document Upload] --> F[Chunk 1000 chars / 100 overlap]
-        F --> G[Store chunks as user entries with metadata]
-    end
+    ChatTurn[Chat turn] --> Retrieve[retrieve recent N entries]
+    Retrieve --> BuildCtx[Build message context]
+    BuildCtx --> LLM[LLM call]
+    LLM --> Store[store user + assistant messages]
 
-    subgraph "Memory Read"
-        H[Chat Request] --> I[Retrieve last N entries]
-        I --> J[Order by recency]
-        J --> K[Include in LLM context]
-    end
+    DocUpload[Document upload] --> Chunk[Chunk 1000 chars / 100 overlap]
+    Chunk --> Store2[store as memory entries\ntagged source=document]
 
-    subgraph "Database"
-        L[(chat_memory table)]
-    end
-
-    B --> L
-    D --> L
-    G --> L
-    L --> I
+    Store --> DB[(chat_memory table)]
+    Store2 --> DB
+    DB --> Retrieve
 ```
 
-## Agent / Tool Orchestration
+The `MemoryStore` interface decouples the chatbot from the storage backend:
 
-```mermaid
-flowchart TB
-    subgraph "Agent System"
-        AR[Agent Registry]
-        WS[web_search Agent]
-        JL[job_listings Agent]
-        SK[static_knowledge_base Agent]
-    end
-
-    subgraph "Tool System"
-        TR[Tool Registry]
-        T1[web_search]
-        T2[search_ba_jobs]
-        T3[get_ba_job_details]
-        T4[search_static_kb]
-        T5[get_static_kb_item]
-        T6[list_static_kb_categories]
-        T7[web_browse - stub]
-        T8[custom_data_lookup - stub]
-        T9[database_query - stub]
-        T10[knowledge_retrieval - stub]
-    end
-
-    subgraph "Chatbot"
-        CS[ChatbotService]
-    end
-
-    AR --> WS
-    AR --> JL
-    AR --> SK
-
-    WS -.->|uses| T1
-    JL -.->|uses| T2
-    JL -.->|uses| T3
-    SK -.->|uses| T4
-    SK -.->|uses| T5
-    SK -.->|uses| T6
-
-    CS -->|all tools available| TR
-    TR --> T1
-    TR --> T2
-    TR --> T3
-    TR --> T4
-    TR --> T5
-    TR --> T6
-    TR --> T7
-    TR --> T8
-    TR --> T9
-    TR --> T10
+```python
+class MemoryStore(ABC):
+    async def add(self, user_id, role, content, metadata=None): ...
+    async def retrieve(self, user_id, query=None, limit=20): ...
+    async def clear(self, user_id): ...
+    async def count(self, user_id): ...
 ```
+
+Current implementation: `DatabaseMemoryStore` (recency-based SQLite).
+Future: swap for a vector store by implementing the same interface.
+
+---
 
 ## MCP Integration
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant EP as MCP Endpoints
-    participant Svc as MCPService
-    participant Reg as MCPRegistry
+    participant Startup
+    participant MCPSvc as MCPService
     participant Client as MCPClient
-    participant Server as Terra-MIG Server
+    participant Server as terra-mig
 
-    Note over EP,Server: Startup: Tool Discovery
-    EP->>Svc: discover_and_register_tools()
-    Svc->>Reg: get_config("terra-mig")
-    Reg-->>Svc: MCPServerConfig
-    Svc->>Client: initialize()
-    Client->>Server: JSON-RPC initialize
-    Server-->>Client: session_id (SSE)
-    Svc->>Client: list_tools()
-    Client->>Server: JSON-RPC tools/list
-    Server-->>Client: tool schemas (SSE)
-    Svc->>Reg: register MCP tool adapters
+    Startup->>MCPSvc: discover_and_register_tools("terra-mig")
+    MCPSvc->>Client: initialize()
+    Client->>Server: POST /mcp\n{"method":"initialize","params":{...}}
+    Server-->>Client: SSE: {"result": {...}}\nheader: mcp-session-id: abc123
+    Client->>Server: POST /mcp\n{"method":"notifications/initialized"}
+    Server-->>Client: 202 Accepted
+    MCPSvc->>Client: list_tools()
+    Client->>Server: POST /mcp\n{"method":"tools/list"}\nheader: mcp-session-id: abc123
+    Server-->>Client: SSE: {"result": {"tools": [...]}}
+    loop each tool schema
+        MCPSvc->>MCPSvc: create MCPToolAdapter(client, schema, "terra-mig")
+        MCPSvc->>TR: register(adapter)
+    end
 
-    Note over EP,Server: Runtime: Tool Call
-    C->>EP: POST /mcp/servers/terra-mig/call
-    EP->>Svc: call_tool("terra-mig", tool_name, args)
-    Svc->>Client: call_tool(tool_name, args)
-    Client->>Server: JSON-RPC tools/call (SSE)
-    Server-->>Client: result content
-    Client-->>Svc: MCPToolCallResult
-    Svc-->>EP: result
-    EP-->>C: JSON response
+    Note over Client,Server: Later — tool call
+    TR->>Client: call_tool("salary_info", {profession:"..."})
+    Client->>Server: POST /mcp\n{"method":"tools/call","params":{...}}
+    Server-->>Client: SSE: {"result": {"content": [...]}}
+    Client-->>TR: MCPToolCallResult
 ```
 
-### MCP Protocol Details
+---
 
-The MCP client uses **Streamable HTTP transport** (JSON-RPC over SSE):
-
-1. **Initialize** — Establishes session, receives `Mcp-Session-Id` header
-2. **Notification** — Sends `notifications/initialized` to confirm
-3. **List Tools** — Discovers available tools and their schemas
-4. **Call Tool** — Invokes a tool with arguments, receives structured content
-
-The terra-mig MCP server provides 10 tools:
-- `search_jobs` — Search BA job postings
-- `get_job_detail` — Get full job detail by reference
-- `map_profession_to_occupation` — Map free-text to KldB-2010 codes
-- `get_salary_band` — Salary data for occupation codes
-- `search_apprenticeships` — Vocational training offers
-- `search_coaching` — AVGS coaching/activation offers
-- `search_continuing_education` — Weiterbildung offers
-- `query_recognition_stats` — Foreign qualification recognition stats
-- `quickcheck_opportunity_card` — Chancenkarte points self-check
-- `quickcheck_visa_route` — Candidate visa route suggestions
-
-## Document Ingestion Pipeline
+## Agent Orchestration
 
 ```mermaid
-flowchart LR
-    A[Client uploads<br/>plain text] --> B[POST /api/v1/documents]
-    B --> C[Store in documents table]
-    C --> D[Chunk content<br/>1000 chars / 100 overlap]
-    D --> E[For each chunk]
-    E --> F["Store in chat_memory<br/>[Document: title] chunk_text"]
-    F --> G[Available to chatbot<br/>via memory retrieval]
+flowchart TD
+    API["POST /agents/run"] --> AR[AgentRegistry.create]
+    AR --> Agent[Agent instance]
+    Agent --> Runner[AgentRunner.run]
+    Runner --> Hooks[hook.on_start]
+
+    Runner --> Loop{iteration < max_iterations}
+    Loop --> Step[agent.step - one LLM call]
+    Step --> Hooks2[hook.on_step]
+    Step --> TC{tool_calls?}
+    TC -->|yes| ExecLoop[for each tool_call]
+    ExecLoop --> HookTC[hook.on_tool_call]
+    ExecLoop --> TR[ToolRegistry.execute]
+    TR --> HookTR[hook.on_tool_result]
+    TR --> Append[append to messages]
+    Append --> Loop
+    TC -->|no| Final[extract final content]
+    Final --> HookC[hook.on_complete]
+    Final --> Result[AgentResult]
 ```
 
-### Chunking Strategy
+---
 
-- **Chunk size:** 1000 characters
-- **Overlap:** 100 characters (ensures context continuity)
-- **Format:** Each chunk is stored as a memory entry with the format `[Document: {title}] {chunk_text}`
-- **Retrieval:** Chunks appear in the chatbot's memory context alongside conversation history
-
-## Database Schema
+## Database
 
 ```mermaid
 erDiagram
     users {
         int id PK
-        string username UK
-        string password_hash
+        str username UK
+        str password_hash
         datetime created_at
         datetime updated_at
     }
-
     sessions {
         int id PK
-        string token UK
+        str token UK
         int user_id FK
         datetime expires_at
         datetime created_at
     }
-
     chat_memory {
         int id PK
         int user_id FK
-        string role
+        str role
         text content
-        json metadata
         datetime created_at
     }
-
     documents {
         int id PK
         int user_id FK
-        string title
+        str title
         text content
-        string content_hash
+        str content_hash
         datetime created_at
         datetime updated_at
     }
 
     users ||--o{ sessions : "has"
-    users ||--o{ chat_memory : "owns"
-    users ||--o{ documents : "uploads"
+    users ||--o{ chat_memory : "has"
+    users ||--o{ documents : "owns"
 ```
 
-## Startup Sequence
+---
+
+## Dependency Injection
+
+FastAPI dependencies flow through each request:
 
 ```mermaid
-flowchart TD
-    A[main.py — create_app] --> B[register_all]
-    B --> C[Register 10 tools]
-    B --> D[Register 3 agents]
-    B --> E[Register MCP servers]
-
-    A --> F[lifespan start]
-    F --> G[Create DB tables]
-    F --> H[Discover MCP tools]
-    H --> I[Initialize MCP session]
-    I --> J[List remote tools]
-    J --> K[Register as tool adapters]
-
-    A --> L[Include API router]
-    L --> M[App ready — accepting requests]
+graph TD
+    Request --> get_db
+    get_db -->|AsyncSession| get_current_user
+    get_current_user -->|User| Endpoint
+    get_db -->|AsyncSession| Endpoint
 ```
 
-## Key Design Decisions
+`get_db` yields a new `AsyncSession` per request from `async_session_factory`.
+`get_current_user` resolves the Bearer token to a `User` object, raising `401` if invalid.
 
-1. **Async-first** — All I/O operations use async/await (SQLAlchemy async, httpx, aiosqlite)
-2. **Registry pattern** — Tools, agents, and MCP servers use global registries with lazy initialization
-3. **Memory as context** — Documents and conversations share the same memory system, making uploaded content automatically available to the chatbot
-4. **Tool loop with cap** — The chatbot can call tools iteratively (max 5 rounds) to gather information before responding
-5. **Non-fatal MCP** — MCP server discovery is best-effort; the app starts even if the MCP server is unreachable
-6. **Session-based auth** — Simple Bearer tokens stored in DB; no JWT complexity needed for this use case
-7. **SQLite for simplicity** — Single-file database appropriate for the current scale; easy to migrate to PostgreSQL via SQLAlchemy
+Both are shared across all endpoints via `Depends()`.

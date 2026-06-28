@@ -1,85 +1,72 @@
 # Deployment
 
+---
+
 ## Docker
 
 ### Dockerfile Overview
 
-The project uses a `python:3.13-slim` base image with `uv` for fast dependency management:
+The `Dockerfile` uses a single-stage build based on `python:3.13-slim`. `uv` is copied from the official image to keep the layer slim.
+
+**Build steps:**
+1. Install system dependencies (`curl` for health check).
+2. Copy `uv` binary from `ghcr.io/astral-sh/uv:latest`.
+3. Copy `pyproject.toml`, `uv.lock`, `README.md` (layer cache for deps).
+4. `uv sync --no-dev --frozen --no-install-project` — install dependencies only.
+5. Copy application source and data.
+6. `uv sync --no-dev --frozen` — install the project itself (fast; deps cached).
+7. Set up entrypoint.
 
 ```dockerfile
 FROM python:3.13-slim AS base
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
-WORKDIR /app
-
-# System deps + uv
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+...
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Dependencies (cached layer)
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --no-dev --frozen --no-install-project
-
-# Application source
 COPY src/ src/
 COPY alembic.ini ./
 COPY data/ data/
 RUN uv sync --no-dev --frozen
-
-# Entrypoint
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-RUN mkdir -p data/static_kb/raw data/static_kb/processed data/static_kb/index
-
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
-
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["serve"]
 ```
 
-### Build and Run
-
-```bash
-# Build
-docker build -t terra-backend .
-
-# Run
-docker run -p 8000:8000 --env-file .env terra-backend
-```
-
 ### Entrypoint Commands
 
-The `docker-entrypoint.sh` supports multiple commands:
+The `docker-entrypoint.sh` supports three commands:
 
 | Command | Description |
-|---------|-------------|
-| `serve` (default) | Start the uvicorn server |
-| `fetch-kb` | Refresh the static knowledge base |
-| `shell` | Open a bash shell in the container |
+|---|---|
+| `serve` (default) | Run database setup and start uvicorn |
+| `fetch-kb` | Refresh the static knowledge base from Integreat CMS |
+| `shell` | Open a bash shell |
 
 ```bash
-# Default: serve
-docker run terra-backend
+# Default: start the server
+docker run terra-backend serve
 
-# Refresh KB manually
+# Refresh KB
 docker run terra-backend fetch-kb
 
-# Debug shell
-docker run -it terra-backend shell
+# Custom command
+docker run terra-backend python -m some.module
 ```
 
-### Startup Sequence (Docker)
+**Startup sequence (`serve`):**
+1. Run `create_all()` to ensure database tables exist.
+2. If `data/static_kb/processed/pages.json` is missing, start `fetch_static_kb` in the background.
+3. Start uvicorn.
 
-1. Create database tables (SQLAlchemy `metadata.create_all`)
-2. If KB data doesn't exist, fetch it in the background (non-blocking)
-3. Start uvicorn on configured host/port
+The server starts immediately; the KB fetch (if needed) runs in the background. The server will operate without KB functionality until the fetch completes.
 
 ---
 
 ## Docker Compose
 
-### Basic Setup
+### `docker-compose.yml`
 
 ```yaml
 services:
@@ -101,89 +88,88 @@ volumes:
   terra-data:
 ```
 
+The `terra-data` named volume persists the database and static KB data across container restarts.
+
+### Running
+
 ```bash
-# Start
+# Build and start
 docker compose up --build
 
-# Start in background
+# Detached
 docker compose up -d --build
 
 # View logs
 docker compose logs -f terra-backend
 
+# Refresh the knowledge base
+docker compose exec terra-backend fetch-kb
+
 # Stop
 docker compose down
 
-# Stop and remove volumes
+# Stop and remove volume (destructive — deletes all data)
 docker compose down -v
-```
-
-### Persistent Data
-
-The `terra-data` volume persists:
-- SQLite database (`data/terra.db`)
-- Static KB files (`data/static_kb/`)
-
-This ensures data survives container restarts.
-
-### Production Compose Example
-
-```yaml
-services:
-  terra-backend:
-    build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env.production
-    environment:
-      - HOST=0.0.0.0
-      - PORT=8000
-      - DATABASE_URL=sqlite+aiosqlite:///data/terra.db
-      - DEBUG=false
-      - WORKERS=2
-    volumes:
-      - terra-data:/app/data
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: "1.0"
-
-volumes:
-  terra-data:
-    driver: local
 ```
 
 ---
 
-## ECS Deployment
+## Production Configuration
 
-### Task Definition
+Minimum required environment variables for production:
 
-Key considerations for AWS ECS:
+```bash
+# Required
+OPENAI_API_KEY=sk-...          # or ANTHROPIC_API_KEY
+SECRET_KEY=<random-64-hex>     # generate: python -c "import secrets; print(secrets.token_hex(32))"
+
+# Strongly recommended
+TAVILY_API_KEY=tvly-...        # enables web search
+ALLOWED_ORIGINS=["https://your-frontend.com"]
+DEBUG=false
+
+# Production database (optional — SQLite works for single-instance)
+DATABASE_URL=sqlite+aiosqlite:///data/terra.db
+```
+
+### Performance
+
+For production, increase uvicorn workers when `DATABASE_URL` points to PostgreSQL. SQLite does not support multiple writers, so keep `WORKERS=1` with SQLite.
+
+```bash
+# In docker-entrypoint.sh or as env var
+WORKERS=1   # with SQLite
+WORKERS=4   # with PostgreSQL
+```
+
+---
+
+## AWS ECS Deployment
+
+The application is deployed on AWS ECS (Elastic Container Service). Key considerations:
+
+### Health Check
+
+The ALB (Application Load Balancer) health check should target `GET /health`. This endpoint has no auth requirement and responds immediately.
+
+```
+Path: /health
+Port: 8000
+Healthy threshold: 2
+Unhealthy threshold: 3
+Interval: 30s
+Timeout: 5s
+```
+
+### ECS Task Definition (relevant settings)
 
 ```json
 {
-  "family": "terra-backend",
-  "networkMode": "awsvpc",
   "containerDefinitions": [
     {
       "name": "terra-backend",
-      "image": "<ecr-repo>/terra-backend:latest",
-      "portMappings": [
-        {"containerPort": 8000, "protocol": "tcp"}
-      ],
-      "environment": [
-        {"name": "HOST", "value": "0.0.0.0"},
-        {"name": "PORT", "value": "8000"},
-        {"name": "DATABASE_URL", "value": "sqlite+aiosqlite:///data/terra.db"}
-      ],
-      "secrets": [
-        {"name": "OPENAI_API_KEY", "valueFrom": "arn:aws:ssm:region:account:parameter/terra/openai-key"},
-        {"name": "SECRET_KEY", "valueFrom": "arn:aws:ssm:region:account:parameter/terra/secret-key"}
-      ],
+      "image": "<ecr-repo>:latest",
+      "portMappings": [{"containerPort": 8000}],
       "healthCheck": {
         "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
         "interval": 30,
@@ -191,180 +177,61 @@ Key considerations for AWS ECS:
         "retries": 3,
         "startPeriod": 15
       },
-      "mountPoints": [
-        {"sourceVolume": "terra-data", "containerPath": "/app/data"}
+      "environment": [
+        {"name": "HOST", "value": "0.0.0.0"},
+        {"name": "PORT", "value": "8000"},
+        {"name": "DATABASE_URL", "value": "sqlite+aiosqlite:///data/terra.db"}
       ],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/terra-backend",
-          "awslogs-region": "us-west-2",
-          "awslogs-stream-prefix": "ecs"
+      "secrets": [
+        {"name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:..."},
+        {"name": "SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:..."}
+      ],
+      "mountPoints": [
+        {
+          "containerPath": "/app/data",
+          "sourceVolume": "terra-data"
         }
-      }
+      ]
     }
-  ],
-  "volumes": [
-    {"name": "terra-data", "efsVolumeConfiguration": {"fileSystemId": "fs-xxx"}}
   ]
 }
 ```
 
-### Load Balancer Configuration
+### EFS Mount for Persistence
 
-- **Target group:** HTTP on port 8000
-- **Health check path:** `/health`
-- **Health check interval:** 30s
-- **Healthy threshold:** 2
-- **Unhealthy threshold:** 3
+Use AWS EFS (Elastic File System) to persist the SQLite database and knowledge base across ECS task replacements:
 
-### Secrets Management
+1. Create an EFS file system in the same VPC.
+2. Mount it at `/app/data` in the task definition.
+3. Set `DATABASE_URL=sqlite+aiosqlite:///data/terra.db`.
 
-Store sensitive values in AWS SSM Parameter Store or Secrets Manager:
-
-```bash
-aws ssm put-parameter --name /terra/openai-key --value "sk-..." --type SecureString
-aws ssm put-parameter --name /terra/secret-key --value "$(python -c 'import secrets; print(secrets.token_hex(32))')" --type SecureString
-aws ssm put-parameter --name /terra/tavily-key --value "tvly-..." --type SecureString
-```
-
-### Storage
-
-Since Terra uses SQLite, the database file needs persistent storage:
-
-- **EFS** — Attach an EFS volume for persistence across task replacements
-- **Alternative** — Migrate to RDS PostgreSQL for multi-instance deployments
+For multi-AZ deployments or horizontal scaling, migrate to RDS PostgreSQL — SQLite on EFS has performance limitations under concurrent write load.
 
 ---
 
-## Environment Setup
-
-### Development
+## Building for Production
 
 ```bash
-# 1. Clone and install
-git clone <repo> && cd terra-backend
-uv sync
+# Build image
+docker build -t terra-backend:latest .
 
-# 2. Configure
-cp .env.example .env
-# Set OPENAI_API_KEY at minimum
+# Tag and push to ECR
+aws ecr get-login-password --region us-west-2 | \
+  docker login --username AWS --password-stdin <account>.dkr.ecr.us-west-2.amazonaws.com
 
-# 3. Install pre-commit hooks
-uv run pre-commit install
-
-# 4. Fetch KB data (optional)
-uv run python -m terra.scripts.fetch_static_kb
-
-# 5. Run
-uv run uvicorn terra.main:app --reload
-```
-
-### Staging
-
-```env
-DEBUG=false
-DATABASE_URL=sqlite+aiosqlite:///data/terra.db
-OPENAI_API_KEY=sk-staging-key
-SECRET_KEY=<generated>
-ALLOWED_ORIGINS=["https://staging.example.com"]
-LLM_DEFAULT_MODEL=gpt-4o-mini
-MCP_ENABLED=true
-```
-
-### Production
-
-```env
-DEBUG=false
-DATABASE_URL=sqlite+aiosqlite:///data/terra.db
-OPENAI_API_KEY=sk-prod-key
-TAVILY_API_KEY=tvly-prod-key
-SECRET_KEY=<generated-32-byte-hex>
-ALLOWED_ORIGINS=["https://app.example.com"]
-LLM_DEFAULT_MODEL=gpt-4o
-MCP_ENABLED=true
-WORKERS=2
+docker tag terra-backend:latest <account>.dkr.ecr.us-west-2.amazonaws.com/terra-backend:latest
+docker push <account>.dkr.ecr.us-west-2.amazonaws.com/terra-backend:latest
 ```
 
 ---
 
-## Health Checks
-
-Two health check endpoints are available:
-
-| Endpoint | Purpose | Use For |
-|----------|---------|---------|
-| `GET /health` | Root-level, minimal | ALB/ECS health probes |
-| `GET /api/v1/health` | API-level | Application monitoring |
-
-Both return `{"status": "healthy"}` with HTTP 200.
-
-### Docker Health Check
-
-Built into the Dockerfile:
-
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-```
-
-- **Interval:** Check every 30 seconds
-- **Timeout:** Fail if no response within 5 seconds
-- **Start period:** Grace period of 15 seconds for startup
-- **Retries:** Mark unhealthy after 3 consecutive failures
-
-### MCP Server Health
-
-The MCP server (`terra-mig`) has its own health endpoint checked via:
+## Non-Docker Local Production
 
 ```bash
-curl https://te-8423728b85714970bb70e62ee24f6cf4.ecs.us-west-2.on.aws/health
+uv sync --no-dev
+uv run uvicorn terra.main:app \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --workers 1 \
+  --log-level info
 ```
-
-Or via the API:
-
-```bash
-curl http://localhost:8000/api/v1/mcp/servers/terra-mig/health \
-  -H "Authorization: Bearer <token>"
-```
-
----
-
-## Scaling Considerations
-
-### Current Limitations (SQLite)
-
-- Single-writer — Only one process can write at a time
-- File-based — Requires shared filesystem for multi-instance
-- No connection pooling benefits
-
-### When to Migrate to PostgreSQL
-
-- Multiple backend instances (horizontal scaling)
-- High write concurrency
-- Need for advanced queries (full-text search, JSONB)
-
-Migration path:
-1. Change `DATABASE_URL` to a PostgreSQL connection string
-2. Use Alembic migrations (already configured)
-3. SQLAlchemy async works with `asyncpg` driver
-
-```env
-DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/terra
-```
-
-### Uvicorn Workers
-
-For single-instance deployments, use multiple workers:
-
-```env
-WORKERS=4  # CPU cores
-```
-
-The entrypoint passes this to uvicorn:
-
-```bash
-uvicorn terra.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
-
-Note: With SQLite + multiple workers, each worker has its own DB connection. This works for read-heavy workloads but may cause write contention.

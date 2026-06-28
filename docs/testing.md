@@ -1,6 +1,8 @@
 # Testing
 
-Terra uses **pytest** with **pytest-asyncio** for testing. All tests run against an in-memory SQLite database.
+Terra uses **pytest** with **pytest-asyncio** for testing. All tests run against an in-memory SQLite database — no external services are called.
+
+---
 
 ## Quick Reference
 
@@ -9,50 +11,50 @@ Terra uses **pytest** with **pytest-asyncio** for testing. All tests run against
 uv run pytest
 
 # Run with coverage
-uv run pytest --cov
+uv run pytest --cov=src/terra --cov-report=term-missing
 
-# Run a specific test file
-uv run pytest tests/test_auth.py
+# Run a specific file
+uv run pytest tests/test_auth.py -v
 
-# Run a specific test
-uv run pytest tests/test_auth.py::test_register_success
+# Run by name pattern
+uv run pytest -k "test_login or test_register"
 
-# Verbose output
-uv run pytest -v
-
-# Stop on first failure
+# Run and stop on first failure
 uv run pytest -x
 ```
+
+Coverage minimum is **80%** (enforced by `[tool.coverage.report] fail_under = 80` in `pyproject.toml`).
+
+---
 
 ## Test Structure
 
 ```
 tests/
-├── conftest.py              # Shared fixtures (db, app, client)
-├── fixtures/
-│   └── static_kb_sample.json  # Sample KB data for testing
-├── test_auth.py             # Auth endpoints (register, login, logout, me)
-├── test_chatbot.py          # Chat endpoint and tool integration
-├── test_documents.py        # Document CRUD
-├── test_agents.py           # Agent listing and execution
-├── test_mcp.py              # MCP server endpoints
-├── test_memory.py           # Memory store implementation
-├── test_tools.py            # Tool registry and execution
-├── test_static_kb.py        # Static knowledge base search
-├── test_ba_jobs.py          # BA Jobsuche client
-├── test_config.py           # Configuration loading
-└── test_health.py           # Health check endpoints
+├── conftest.py          # Shared fixtures
+├── test_auth.py         # Authentication endpoints
+├── test_chatbot.py      # /chat endpoint, ChatbotService
+├── test_documents.py    # Document CRUD endpoints
+├── test_ba_jobs.py      # BAJobsClient, SearchBAJobsTool, GetBAJobDetailsTool
+├── test_static_kb.py    # StaticKBService, KB tools
+├── test_tools.py        # Tool base class, ToolRegistry
+├── test_agents.py       # Agent implementations, AgentRegistry
+├── test_agents_api.py   # /agents and /tools endpoints
+├── test_mcp.py          # MCP client, registry, service, tool adapter
+├── test_llm.py          # LLMService, LLMResponse parsing
+├── test_web_search.py   # WebSearchTool, TavilySearchProvider
+└── test_health.py       # Health check endpoints
 ```
 
-**162 tests** across 11 test files.
+One test file per domain module. This keeps related tests together and makes it easy to run a specific domain's tests in isolation.
 
-## Fixtures
+---
 
-All fixtures are defined in `tests/conftest.py`:
+## Fixtures (`conftest.py`)
 
-### `db` — Database Session
+### `db`
 
-Provides a fresh async SQLAlchemy session backed by in-memory SQLite. Tables are created before each test and dropped after.
+An in-memory SQLite session with fresh tables for each test. All tables are created before the test and dropped after.
 
 ```python
 @pytest.fixture
@@ -65,23 +67,25 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
         await conn.run_sync(Base.metadata.drop_all)
 ```
 
-### `app` — FastAPI Application
+### `app`
 
-Creates a fresh app instance with the DB dependency overridden to use the test database:
+A FastAPI application instance with the `get_db` dependency overridden to use the test session:
 
 ```python
 @pytest.fixture
 def app(db: AsyncSession):
     application = create_app()
+
     async def _override_get_db():
         yield db
+
     application.dependency_overrides[get_db] = _override_get_db
     return application
 ```
 
-### `client` — HTTP Client
+### `client`
 
-An `httpx.AsyncClient` bound to the test app via `ASGITransport`:
+An `httpx.AsyncClient` bound to the test app via `ASGITransport`. No real network calls are made.
 
 ```python
 @pytest.fixture
@@ -91,129 +95,155 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
         yield ac
 ```
 
-### Test Data Fixture
-
-`tests/fixtures/static_kb_sample.json` contains a sample of Integreat CMS pages for testing the static knowledge base search without hitting the real API.
+---
 
 ## Mocking Strategy
 
-### External API Calls
+### LLM calls
 
-External services (LLM, Tavily, BA Jobsuche, MCP) are mocked using `unittest.mock.patch` or `pytest-mock`:
+LLM calls (`LLMService.completion`) are mocked with `unittest.mock.AsyncMock` or `pytest-mock`:
 
 ```python
 from unittest.mock import AsyncMock, patch
+from terra.llm.types import LLMResponse, TokenUsage
 
-async def test_chat_with_mock_llm(client):
-    # Mock the LLM completion to avoid real API calls
-    with patch("terra.llm.service.LLMService.completion") as mock_llm:
-        mock_llm.return_value = MockResponse(content="Hello!", tool_calls=None)
-        resp = await client.post(
-            "/api/v1/chat",
-            json={"message": "Hi"},
-            headers={"Authorization": "Bearer <token>"},
+mock_response = LLMResponse(
+    content="Here is some information about healthcare...",
+    tool_calls=[],
+    usage=TokenUsage(prompt_tokens=50, completion_tokens=100, total_tokens=150),
+    model="gpt-4o-mini",
+    finish_reason="stop",
+)
+
+with patch("terra.llm.service.litellm.acompletion", new_callable=AsyncMock) as mock_llm:
+    mock_llm.return_value = build_litellm_response(mock_response)
+    result = await chatbot.chat(user_id=1, message="What is healthcare like?")
+```
+
+### External API calls
+
+BA Jobsuche and Tavily calls are mocked at the `httpx.AsyncClient` level or by injecting a fake provider:
+
+```python
+# Inject a mock search provider
+from terra.services.search.base import SearchProvider, SearchResponse, SearchResult
+
+class FakeSearchProvider(SearchProvider):
+    async def search(self, query, **kwargs):
+        return SearchResponse(
+            query=query,
+            results=[SearchResult(title="Test", url="https://example.com", snippet="...", domain="example.com")]
         )
-    assert resp.status_code == 200
+
+tool = WebSearchTool(provider=FakeSearchProvider())
+result = await tool.execute(query="healthcare Germany")
 ```
 
-### Tool Execution
+### MCP client
 
-Tools that call external APIs are mocked at the tool level:
+MCPClient is mocked to return pre-defined tool schemas and call results:
 
 ```python
-with patch("terra.tools.search.TavilyClient") as mock_tavily:
-    mock_tavily.return_value.search.return_value = {"results": [...]}
-    result = await tool.execute(query="test")
+from unittest.mock import AsyncMock
+from terra.mcp.schemas import MCPToolSchema, MCPToolCallResult
+
+mock_client = AsyncMock()
+mock_client.list_tools.return_value = [
+    MCPToolSchema(name="salary_info", description="Get salary info", input_schema={})
+]
+mock_client.call_tool.return_value = MCPToolCallResult(
+    success=True,
+    content=[{"type": "text", "text": '{"median": 60000}'}]
+)
 ```
 
-### MCP Client
+### Static KB
 
-The MCP client is mocked to avoid requiring a live MCP server during tests:
+Tests inject a custom `StaticKBService` with controlled data:
 
 ```python
-with patch("terra.mcp.client.MCPClient.call_tool") as mock_call:
-    mock_call.return_value = MCPToolCallResult(
-        success=True,
-        content=[{"type": "text", "text": "result"}],
-    )
+from terra.services.static_kb import StaticKBService
+
+sample_pages = [
+    {"id": "1", "title": "Healthcare", "category": "gesundheit",
+     "content_text": "Information about health insurance...", "url": "https://..."}
+]
+
+class FakeKBService(StaticKBService):
+    def _load_pages(self):
+        return sample_pages
 ```
 
-### Database
+---
 
-No mocking needed — tests use a real in-memory SQLite database. This ensures ORM queries and models are exercised.
+## Async Configuration
 
-## Writing Tests
-
-### Basic Pattern
+All tests that use `async/await` must be marked or the entire suite configured for async. `asyncio_mode = "auto"` in `pyproject.toml` means pytest-asyncio automatically handles async test functions:
 
 ```python
-"""Tests for feature X."""
+# No need to explicitly mark — all async test functions run automatically
+async def test_something():
+    result = await some_async_function()
+    assert result is not None
+```
 
-import pytest
-from httpx import AsyncClient
+---
 
+## Example Test Patterns
 
-@pytest.mark.asyncio
-async def test_feature_happy_path(client: AsyncClient):
-    """Test description."""
-    response = await client.post("/api/v1/endpoint", json={"key": "value"})
+### Testing an authenticated endpoint
+
+```python
+async def test_get_documents_authenticated(client):
+    # Register and get token
+    reg = await client.post("/api/v1/auth/register",
+                            json={"username": "alice", "password": "password123"})
+    token = reg.json()["token"]
+
+    # Use token in subsequent requests
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get("/api/v1/documents", headers=headers)
     assert response.status_code == 200
-    data = response.json()
-    assert data["expected_field"] == "expected_value"
-
-
-@pytest.mark.asyncio
-async def test_feature_error_case(client: AsyncClient):
-    """Test error handling."""
-    response = await client.post("/api/v1/endpoint", json={})
-    assert response.status_code == 422
+    assert response.json() == []
 ```
 
-### Testing Authenticated Endpoints
-
-Create a user and login first, then use the token:
+### Testing a tool directly
 
 ```python
-@pytest.mark.asyncio
-async def test_authenticated_endpoint(client: AsyncClient):
-    # Register
-    resp = await client.post(
-        "/api/v1/auth/register",
-        json={"username": "testuser", "password": "testpass123"},
-    )
-    token = resp.json()["token"]
-
-    # Use authenticated endpoint
-    resp = await client.post(
-        "/api/v1/chat",
-        json={"message": "Hello"},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
+async def test_search_static_kb_tool():
+    # Use a fake service to avoid file I/O
+    from terra.tools.static_kb import SearchStaticKBTool
+    tool = SearchStaticKBTool(service=FakeKBService())
+    result = await tool.execute(query="healthcare")
+    assert result.success
+    assert len(result.data["results"]) > 0
 ```
 
-### Testing Service Layer Directly
+### Testing database isolation
+
+Each test gets a fresh database. No state leaks between tests:
 
 ```python
-from terra.services.auth import create_user, authenticate_user
-
-@pytest.mark.asyncio
-async def test_create_user(db):
+async def test_user_isolation(db):
+    # Create user in this test
     user = await create_user(db, "alice", "password123")
-    assert user.username == "alice"
-    assert user.password_hash != "password123"  # Hashed
+    assert user.id is not None
+
+    # No other users exist
+    from sqlalchemy import select
+    from terra.models.user import User
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    assert len(users) == 1
 ```
 
-## Configuration
+---
 
-Test configuration lives in `pyproject.toml`:
+## Coverage
+
+Coverage is configured to exclude migration files:
 
 ```toml
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-addopts = "-v --tb=short"
-
 [tool.coverage.run]
 source = ["src/terra"]
 omit = ["src/terra/db/migrations/*"]
@@ -223,18 +253,22 @@ fail_under = 80
 show_missing = true
 ```
 
-Key settings:
-- `asyncio_mode = "auto"` — All async tests run without explicit `@pytest.mark.asyncio` (though it's still used for clarity)
-- `fail_under = 80` — Coverage must be at least 80%
-- Migrations are excluded from coverage
+```bash
+# Generate HTML report
+uv run pytest --cov=src/terra --cov-report=html
+open htmlcov/index.html
+```
+
+---
 
 ## CI Integration
 
-Tests run as part of the pre-commit hooks and CI pipeline:
+Tests are intended to run in CI with no external dependencies:
 
 ```bash
-# Full check (lint + type check + tests)
-uv run ruff check src/ tests/
-uv run mypy src/
-uv run pytest --cov --cov-report=term-missing
+# Minimal CI setup
+uv sync
+uv run pytest --cov=src/terra
 ```
+
+The `MCP_ENABLED=false` env var can be set in CI to skip MCP discovery, which would otherwise make real network calls during startup. However, MCP discovery is already non-fatal (wrapped in `suppress(Exception)`), so this is optional.
