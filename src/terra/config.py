@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     memory_provider: str = "database"
     memory_context_limit: int = 20
 
+    # MCP Servers
+    mcp_enabled: bool = True
+    mcp_terra_mig_name: str = "terra-mig"
+    mcp_terra_mig_health_url: str = (
+        "https://te-8423728b85714970bb70e62ee24f6cf4.ecs.us-west-2.on.aws/health"
+    )
+    mcp_terra_mig_endpoint_url: str = (
+        "https://te-8423728b85714970bb70e62ee24f6cf4.ecs.us-west-2.on.aws/mcp"
+    )
+    mcp_request_timeout_seconds: float = 30.0
+
 
 @lru_cache
 def get_settings() -> Settings:
