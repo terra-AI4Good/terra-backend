@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "postman": {
+      "description": "Manually configured — already active"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/geetu/work/temp/ai4good/terra-backend"],
+      "description": "Read/write project files. Useful for reading source files, tests, and config without leaving the chat."
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/home/geetu/work/temp/ai4good/terra-backend/terra.db"],
+      "description": "Query the local SQLite database directly. Useful for inspecting memory entries, users, sessions, and documents during development."
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub integration for PR review, issue tracking, and branch management."
+    }
+  }
+}
