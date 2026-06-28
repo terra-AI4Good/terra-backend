@@ -67,6 +67,7 @@ ignore = [
 "tests/**/*.py" = ["S101", "ARG001", "ARG002", "S106"]
 "src/terra/db/migrations/**/*.py" = ["E501"]
 "src/terra/schemas/jobs.py" = ["N815"]
+"src/terra/setup.py" = ["S110"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["terra"]
