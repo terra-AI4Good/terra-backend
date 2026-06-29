@@ -31,6 +31,58 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"  # noqa: S105
     allowed_origins: list[str] = ["http://localhost:3000"]
 
+    # LLM / LiteLLM
+    llm_default_model: str = "gpt-4o-mini"
+    llm_default_temperature: float = 0.7
+    llm_default_max_tokens: int = 4096
+    llm_default_timeout: float = 60.0
+
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    azure_api_key: str | None = None
+    azure_api_base: str | None = None
+    azure_api_version: str | None = None
+
+    # Tools / External services
+    search_api_key: str | None = None
+    search_api_provider: str = "tavily"
+    tavily_api_key: str | None = None
+    tavily_search_depth: str = "basic"
+    tavily_default_max_results: int = 5
+    tavily_timeout_seconds: float = 20.0
+
+    # BA Jobsuche API
+    ba_jobs_base_url: str = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service"
+    ba_jobs_api_key: str = "jobboerse-jobsuche"
+    ba_jobs_default_radius_km: int = 50
+    ba_jobs_default_size: int = 10
+    ba_jobs_fetch_details_limit: int = 5
+
+    # Static Knowledge Base (Integreat CMS pages)
+    static_kb_api_url: str = (
+        "https://cms.integreat-app.de/testumgebung-frag-integreat"
+        "/de/wp-json/extensions/v3/pages/"
+    )
+    static_kb_api_key: str | None = None
+    static_kb_raw_path: str = "data/static_kb/raw/payload.json"
+    static_kb_processed_path: str = "data/static_kb/processed/pages.json"
+    static_kb_fetch_timeout_seconds: float = 60.0
+
+    # Memory
+    memory_provider: str = "database"
+    memory_context_limit: int = 20
+
+    # MCP Servers
+    mcp_enabled: bool = True
+    mcp_terra_mig_name: str = "terra-mig"
+    mcp_terra_mig_health_url: str = (
+        "https://te-8423728b85714970bb70e62ee24f6cf4.ecs.us-west-2.on.aws/health"
+    )
+    mcp_terra_mig_endpoint_url: str = (
+        "https://te-8423728b85714970bb70e62ee24f6cf4.ecs.us-west-2.on.aws/mcp"
+    )
+    mcp_request_timeout_seconds: float = 30.0
+
 
 @lru_cache
 def get_settings() -> Settings:
